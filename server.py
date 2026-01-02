@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Header
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import time
 import re
 import hashlib
+import secrets
 
 
 ROOT_DIR = Path(__file__).parent
@@ -22,6 +23,9 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+
+# Admin API Key for viewing submissions (set in environment variables)
+ADMIN_API_KEY = os.environ.get('ADMIN_API_KEY', 'change-this-key-in-production')
 
 # Create the main app without a prefix
 app = FastAPI()
@@ -33,6 +37,16 @@ api_router = APIRouter(prefix="/api")
 rate_limit_store = {}
 RATE_LIMIT_WINDOW = 60  # seconds
 RATE_LIMIT_MAX_REQUESTS = 5  # max contact form submissions per window
+
+
+def verify_admin_key(api_key: str = Header(None, alias="X-Admin-Key")):
+    """Verify the admin API key"""
+    if not api_key or api_key != ADMIN_API_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing API key. Add 'X-Admin-Key' header."
+        )
+    return True
 
 
 # Define Models
@@ -274,14 +288,42 @@ async def submit_contact_form(submission: ContactFormCreate, request: Request):
 
 
 @api_router.get("/contact/submissions", response_model=List[dict])
-async def get_contact_submissions():
-    """Get all non-spam contact submissions (admin endpoint - should be protected in production)"""
+async def get_contact_submissions(api_key: str = Header(None, alias="X-Admin-Key")):
+    """Get all contact submissions (protected - requires API key)"""
+    verify_admin_key(api_key)
+    
     submissions = await db.contact_submissions.find(
-        {"is_spam": False}, 
+        {}, 
         {"_id": 0, "ip_hash": 0}  # Exclude sensitive fields
     ).sort("timestamp", -1).to_list(100)
     
     return submissions
+
+
+@api_router.get("/contact/submissions/clean", response_model=List[dict])
+async def get_clean_contact_submissions(api_key: str = Header(None, alias="X-Admin-Key")):
+    """Get only non-spam contact submissions (protected - requires API key)"""
+    verify_admin_key(api_key)
+    
+    submissions = await db.contact_submissions.find(
+        {"is_spam": False}, 
+        {"_id": 0, "ip_hash": 0}
+    ).sort("timestamp", -1).to_list(100)
+    
+    return submissions
+
+
+@api_router.delete("/contact/submissions/{submission_id}")
+async def delete_submission(submission_id: str, api_key: str = Header(None, alias="X-Admin-Key")):
+    """Delete a specific submission (protected - requires API key)"""
+    verify_admin_key(api_key)
+    
+    result = await db.contact_submissions.delete_one({"id": submission_id})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    
+    return {"success": True, "message": "Submission deleted"}
 
 
 # Include the router in the main app
