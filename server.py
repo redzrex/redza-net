@@ -246,28 +246,22 @@ async def submit_contact_form(submission: ContactFormCreate, request: Request):
             is_spam=is_spam
         )
         
-        # 4. Store in database
+        # 4. If spam, reject immediately without storing
+        if is_spam:
+            logger.warning(f"Spam detected from {ip_hash}: {spam_reason}")
+            raise HTTPException(
+                status_code=400,
+                detail="Your message was flagged as spam. Please try again with a legitimate message."
+            )
+        
+        # 5. Store valid submission in database
         doc = contact_entry.model_dump()
         doc['timestamp'] = doc['timestamp'].isoformat()
-        doc['spam_reason'] = spam_reason if is_spam else None
         
         await db.contact_submissions.insert_one(doc)
         
-        # 5. Log the submission (for monitoring)
-        logger.info(f"Contact form submission: {contact_entry.id}, spam={is_spam}")
-        
-        # 6. In production, you would send email here
-        # For now, we store in database and could integrate with:
-        # - SendGrid, Mailgun, AWS SES for email delivery
-        # - Slack/Discord webhook for notifications
-        
-        if is_spam:
-            # Still return success to not tip off spammers
-            return ContactFormResponse(
-                success=True,
-                message="Thank you for your message. I will get back to you soon.",
-                id=contact_entry.id
-            )
+        # 6. Log the submission (for monitoring)
+        logger.info(f"Contact form submission: {contact_entry.id}")
         
         return ContactFormResponse(
             success=True,
