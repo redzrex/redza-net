@@ -275,21 +275,10 @@ async def submit_contact_form(submission: ContactFormCreate, request: Request):
 
 @api_router.get("/contact/submissions", response_model=List[dict])
 async def get_contact_submissions():
-    """Get all contact submissions (admin endpoint - should be protected in production)"""
-    submissions = await db.contact_submissions.find(
-        {}, 
-        {"_id": 0, "ip_hash": 0}  # Exclude sensitive fields
-    ).sort("timestamp", -1).to_list(100)
-    
-    return submissions
-
-
-@api_router.get("/contact/submissions/clean", response_model=List[dict])
-async def get_clean_contact_submissions():
-    """Get only non-spam contact submissions"""
+    """Get all non-spam contact submissions (admin endpoint - should be protected in production)"""
     submissions = await db.contact_submissions.find(
         {"is_spam": False}, 
-        {"_id": 0, "ip_hash": 0}
+        {"_id": 0, "ip_hash": 0}  # Exclude sensitive fields
     ).sort("timestamp", -1).to_list(100)
     
     return submissions
